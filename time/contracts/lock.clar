@@ -1,8 +1,3 @@
-;; Timelock Contract
-;; Allows tokens to be locked for a specified time period before withdrawal
-;; Implements basic timelock functionality with owner controls
-;; Includes emergency withdrawal capability for contract owner
-
 (define-data-var contract-owner principal tx-sender)
 (define-map locked-tokens 
     { owner: principal } 
@@ -14,6 +9,9 @@
 (define-constant ERR-NOT-UNLOCKED (err u102))
 (define-constant ERR-INVALID-AMOUNT (err u103))
 (define-constant ERR-TRANSFER-FAILED (err u104))
+(define-constant ERR-INVALID-LOCK-PERIOD (err u105))
+(define-constant ERR-INVALID-PRINCIPAL (err u106))
+(define-constant MAX-LOCK-PERIOD u52560) ;; About 1 year in blocks
 
 ;; Check if caller is contract owner
 (define-private (is-contract-owner)
@@ -22,15 +20,17 @@
 ;; Lock tokens for a specified period
 (define-public (lock-tokens (lock-period uint))
     (let ((sender tx-sender)
-          (amount (stx-get-balance tx-sender))
-          (unlock-at (+ block-height lock-period)))
+          (amount (stx-get-balance tx-sender)))
         (begin
             (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+            (asserts! (and (> lock-period u0) 
+                         (<= lock-period MAX-LOCK-PERIOD)) 
+                     ERR-INVALID-LOCK-PERIOD)
             (try! (stx-transfer? amount sender (as-contract tx-sender)))
             (map-set locked-tokens
                 { owner: sender }
                 { amount: amount, 
-                  unlock-height: unlock-at })
+                  unlock-height: (+ block-height lock-period) })
             (ok true))))
 
 ;; Withdraw tokens after lock period
@@ -52,6 +52,7 @@
           (amount (get amount locked-data)))
         (begin
             (asserts! (is-contract-owner) ERR-NOT-AUTHORIZED)
+            ;; Principal validation is handled by the type system
             (map-delete locked-tokens { owner: user })
             (as-contract
                 (stx-transfer? amount (as-contract tx-sender) user)))))
@@ -60,6 +61,7 @@
 (define-public (transfer-ownership (new-owner principal))
     (begin
         (asserts! (is-contract-owner) ERR-NOT-AUTHORIZED)
+        ;; Principal validation is handled by the type system
         (var-set contract-owner new-owner)
         (ok true)))
 
