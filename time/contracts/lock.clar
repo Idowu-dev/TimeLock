@@ -1,3 +1,8 @@
+;; Timelock Contract
+;; Allows tokens to be locked for a specified time period before withdrawal
+;; Implements basic timelock functionality with owner controls
+;; Includes emergency withdrawal capability for contract owner
+
 (define-data-var contract-owner principal tx-sender)
 (define-map locked-tokens 
     { owner: principal } 
@@ -7,6 +12,12 @@
 (define-constant ERR-NOT-AUTHORIZED (err u100))
 (define-constant ERR-NO-LOCKED-TOKENS (err u101))
 (define-constant ERR-NOT-UNLOCKED (err u102))
+(define-constant ERR-INVALID-AMOUNT (err u103))
+(define-constant ERR-TRANSFER-FAILED (err u104))
+
+;; Check if caller is contract owner
+(define-private (is-contract-owner)
+    (is-eq tx-sender (var-get contract-owner)))
 
 ;; Lock tokens for a specified period
 (define-public (lock-tokens (lock-period uint))
@@ -14,7 +25,7 @@
           (amount (stx-get-balance tx-sender))
           (unlock-at (+ block-height lock-period)))
         (begin
-            (asserts! (> amount u0) (err u103))
+            (asserts! (> amount u0) ERR-INVALID-AMOUNT)
             (try! (stx-transfer? amount sender (as-contract tx-sender)))
             (map-set locked-tokens
                 { owner: sender }
@@ -34,6 +45,24 @@
             (as-contract
                 (stx-transfer? amount (as-contract tx-sender) tx-sender)))))
 
+;; Emergency withdrawal by contract owner
+(define-public (emergency-withdraw (user principal))
+    (let ((locked-data (unwrap! (map-get? locked-tokens { owner: user })
+                               ERR-NO-LOCKED-TOKENS))
+          (amount (get amount locked-data)))
+        (begin
+            (asserts! (is-contract-owner) ERR-NOT-AUTHORIZED)
+            (map-delete locked-tokens { owner: user })
+            (as-contract
+                (stx-transfer? amount (as-contract tx-sender) user)))))
+
+;; Transfer contract ownership
+(define-public (transfer-ownership (new-owner principal))
+    (begin
+        (asserts! (is-contract-owner) ERR-NOT-AUTHORIZED)
+        (var-set contract-owner new-owner)
+        (ok true)))
+
 ;; Check locked amount
 (define-read-only (get-locked-amount (owner principal))
     (match (map-get? locked-tokens { owner: owner })
@@ -45,3 +74,7 @@
     (match (map-get? locked-tokens { owner: owner })
         locked-data (ok (get unlock-height locked-data))
         ERR-NO-LOCKED-TOKENS))
+
+;; Check if user has locked tokens
+(define-read-only (has-locked-tokens (owner principal))
+    (is-some (map-get? locked-tokens { owner: owner })))
