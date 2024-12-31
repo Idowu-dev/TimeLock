@@ -1,3 +1,8 @@
+;; Timelock Contract
+;; Allows tokens to be locked for a specified time period before withdrawal
+;; Implements basic timelock functionality with owner controls
+;; Includes emergency withdrawal capability for contract owner
+
 (define-data-var contract-owner principal tx-sender)
 (define-map locked-tokens 
     { owner: principal } 
@@ -42,8 +47,10 @@
         (begin
             (asserts! (>= block-height unlock-height) ERR-NOT-UNLOCKED)
             (map-delete locked-tokens { owner: tx-sender })
-            (as-contract
-                (stx-transfer? amount (as-contract tx-sender) tx-sender)))))
+            (asserts! (is-ok (as-contract
+                (stx-transfer? amount (as-contract tx-sender) tx-sender)))
+                ERR-TRANSFER-FAILED)
+            (ok true))))
 
 ;; Emergency withdrawal by contract owner
 (define-public (emergency-withdraw (user principal))
@@ -52,16 +59,18 @@
           (amount (get amount locked-data)))
         (begin
             (asserts! (is-contract-owner) ERR-NOT-AUTHORIZED)
-            ;; Principal validation is handled by the type system
+            (asserts! (not (is-eq user (var-get contract-owner))) ERR-INVALID-PRINCIPAL)
             (map-delete locked-tokens { owner: user })
-            (as-contract
-                (stx-transfer? amount (as-contract tx-sender) user)))))
+            (asserts! (is-ok (as-contract
+                (stx-transfer? amount (as-contract tx-sender) user)))
+                ERR-TRANSFER-FAILED)
+            (ok true))))
 
 ;; Transfer contract ownership
 (define-public (transfer-ownership (new-owner principal))
     (begin
         (asserts! (is-contract-owner) ERR-NOT-AUTHORIZED)
-        ;; Principal validation is handled by the type system
+        (asserts! (not (is-eq new-owner (var-get contract-owner))) ERR-INVALID-PRINCIPAL)
         (var-set contract-owner new-owner)
         (ok true)))
 
